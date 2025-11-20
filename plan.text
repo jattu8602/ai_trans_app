@@ -1,0 +1,54 @@
+AttackCapital Assignment: AI-Powered Audio Scribing and Meeting Transcription App
+Key Objectives
+Build a real-time audio transcription tool using Next.js that captures and scribes audio from direct microphone input or shared meeting tabs (e.g., Google Meet/Zoom), streams to Gemini for live transcription, and stores sessions in Postgres.
+Handle long-duration sessions: Architect for up to 1-hour or more recordings with chunked streaming to avoid memory overload, ensuring low-latency UI updates via Socket.io.
+Post-processing: On stop, generate AI summary; manage states (recording, paused, processing, completed) with seamless UI feedback.
+Challenge level: Design resilient streaming pipelines (e.g., buffer overflows, network drops), optimize Gemini prompts for accurate multi-speaker diarization, and evaluate architecture trade-offs like WebRTC vs. raw MediaRecorder—require analysis of scalability for concurrent sessions.
+Tech Stack
+Frontend/Backend: Next.js 14+ (App Router, TypeScript) with Node.js for WebSocket server.
+Database: Postgres via Prisma ORM.
+Authentication: Better Auth
+Integrations: Google Gemini API (for transcription/summary); Socket.io for real-time status streaming.
+Audio Transcription hints: Via Audio chunks
+Other: Well-documented code (JSDoc/TypeDoc), ESLint/Prettier, Git repo with branches.
+Quick Setup Steps
+Set up Postgres (local via Docker or cloud like Supabase).
+Initialize Next.js project
+Get free Gemini API key from ai.google.dev.
+
+Comprehensive Assignment Specification: Building an AI Scribing App for Meetings
+This assignment simulates a productivity tool for professionals, turning raw audio into searchable, summarized transcripts—ideal for meetings where manual notes fall short. Expect decisions like hybrid local/remote buffering for 1hr sessions (e.g., client-side chunking to Node.js via WebSockets), secure screen-share permissions, and prompt engineering for Gemini to handle accents/noise.
+Project Overview
+Develop a full-stack app called "ScribeAI" for capturing and transcribing audio sessions. Core flow: Authenticate → Start recording (mic or tab share) → Stream/transcribe live → Pause/resume → Stop → Process summary → View/export transcript.
+Session Handling: Up to 1hr; chunk audio every 30s to Gemini for incremental transcription
+Meeting Integration: Prompt for tab/screen share (via getDisplayMedia); capture system audio from Meet/Zoom tabs.
+States: Real-time UI via Socket.io (e.g., "Recording", “Processing”,”Paused”,”Completed”).
+Edge case: UI Device turned off -> handle recording seamlessly
+Detailed Requirements
+1. Authentication and User Management
+2. Database (Postgres via Prisma)
+3. Core UI/Frontend (Next.js)
+Recording Interface: Dashboard with "Start Session" button; toggles for mic vs. tab share (prompt browser permissions like GMeet).
+Session History: List of past sessions with preview snippets.
+Tab Sharing: On select, use navigator.mediaDevices.getDisplayMedia({video: false, audio: true}) to capture tab audio; fallback to mic.
+Styling: Tailwind CSS; responsive, with dark mode for long sessions.
+Challenge: Handle stream interruptions (e.g., tab close) with auto-reconnect; use React state machines (XState) for seamless transitions.
+4. Backend Integrations and Features
+Node.js Server
+Audio Capture/Streaming
+Transcription with Gemini
+Post-Processing Summary:
+On stop: Socket.io broadcasts 'processing'; aggregate full transcript, call Gemini with: "Summarize this meeting: key points, action items, decisions."
+Store summary/transcript in DB; emit 'completed' with download URL.
+5. Code Quality and Documentation
+Maintainability: Modular (e.g., /app/sessions/page.tsx, /server/sockets/recording.js, /lib/gemini.ts). Type-safe with Zod for payloads.
+Docs: Inline JSDoc; flow diagram (Mermaid in README) for stream pipeline; setup script (npm run dev starts Next.js + Node server).
+Challenge: 200-word section in README on long-session scalability
+Deliverables
+Public GitHub repo.
+In README.md: Include an architecture comparison table (latency, reliability for streaming vs. upload) + key decisions.
+Video walkthrough (3-5 min, using Loom or unlisted YouTube): Start mic/tab recording, pause/resume, stop/process, view summary.
+Timeline and Submission
+4 days from receipt.
+Questions? Email us back.
+Success metric: Functional end-to-end prototype + analysis showing media handling depth.
