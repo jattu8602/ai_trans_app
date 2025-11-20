@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card'
 import { ArrowLeft, Play, Pause } from 'lucide-react'
 import { useDevice } from '@/hooks/useDevice'
 import { useChunkPlayback } from '@/hooks/useChunkPlayback'
+import { useSocket } from '@/hooks/useSocket'
 import { getDeviceId } from '@/lib/device'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -28,22 +29,44 @@ export default function SessionDetailsPage() {
   const router = useRouter()
   const sessionId = params.id as string
   const { deviceId } = useDevice()
-  const { chunks, audioUrl, totalDuration, isLoading, error, loadChunks, cleanup } = useChunkPlayback()
+  const {
+    chunks,
+    audioUrl,
+    totalDuration,
+    isLoading,
+    error,
+    loadChunks,
+    cleanup,
+  } = useChunkPlayback()
 
   const [session, setSession] = useState<Session | null>(null)
   const [isLoadingSession, setIsLoadingSession] = useState(true)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(
+    null
+  )
   const [currentTime, setCurrentTime] = useState(0)
   const [audioDuration, setAudioDuration] = useState(0)
+  const [mergedTranscript, setMergedTranscript] = useState<string>('')
 
-  // Load session data
+  // Socket.io for real-time transcript updates
+  const {
+    on,
+    off,
+    joinSession,
+    leaveSession,
+    isConnected: isSocketConnected,
+  } = useSocket()
+
+  // Load session data and chunks with transcripts
   useEffect(() => {
     const loadSession = async () => {
       try {
         setIsLoadingSession(true)
         const id = getDeviceId()
-        const response = await fetch(`/api/sessions/${sessionId}?deviceId=${id}`)
+        const response = await fetch(
+          `/api/sessions/${sessionId}?deviceId=${id}`
+        )
 
         if (!response.ok) {
           throw new Error('Failed to load session')
@@ -58,11 +81,69 @@ export default function SessionDetailsPage() {
       }
     }
 
+    const loadChunksWithTranscripts = async () => {
+      try {
+        const id = getDeviceId()
+        const response = await fetch(
+          `/api/sessions/${sessionId}/chunks?deviceId=${id}`
+        )
+
+        if (response.ok) {
+          const data = await response.json()
+          // Merge transcripts from all chunks in chronological order
+          const transcripts = data.chunks
+            .filter((chunk: any) => chunk.transcript && chunk.transcript.trim())
+            .map((chunk: any) => chunk.transcript.trim())
+            .join(' ')
+
+          setMergedTranscript(transcripts)
+        }
+      } catch (error) {
+        console.error('Error loading chunks with transcripts:', error)
+      }
+    }
+
     if (sessionId) {
       loadSession()
       loadChunks(sessionId)
+      loadChunksWithTranscripts()
     }
   }, [sessionId, loadChunks])
+
+  // Listen for real-time transcript updates via Socket.io
+  useEffect(() => {
+    if (!sessionId || !isSocketConnected) return
+
+    // Join session room
+    joinSession(sessionId)
+
+    // Listen for transcript updates
+    const handleTranscriptUpdate = (data: {
+      sessionId: string
+      chunkIndex: number
+      transcript: string
+      mergedTranscript: string
+      isFinal: boolean
+    }) => {
+      if (data.sessionId === sessionId) {
+        console.log('[SessionDetails] Received transcript update:', data)
+        setMergedTranscript(data.mergedTranscript)
+      }
+    }
+
+    const handleTranscriptError = (data: { error: string }) => {
+      console.error('[SessionDetails] Transcript error:', data.error)
+    }
+
+    on('transcription:updated', handleTranscriptUpdate)
+    on('transcription:error', handleTranscriptError)
+
+    return () => {
+      off('transcription:updated', handleTranscriptUpdate)
+      off('transcription:error', handleTranscriptError)
+      leaveSession(sessionId)
+    }
+  }, [sessionId, isSocketConnected, on, off, joinSession, leaveSession])
 
   // Setup audio element with event listeners
   useEffect(() => {
@@ -164,9 +245,11 @@ export default function SessionDetailsPage() {
   const displayDuration =
     session?.duration && session.duration > 0
       ? session.duration
-      : (audioDuration > 0 && isFinite(audioDuration) && !isNaN(audioDuration)
-          ? audioDuration
-          : (totalDuration > 0 ? totalDuration : 0))
+      : audioDuration > 0 && isFinite(audioDuration) && !isNaN(audioDuration)
+      ? audioDuration
+      : totalDuration > 0
+      ? totalDuration
+      : 0
 
   const formatDuration = (seconds: number | null | undefined): string => {
     // Handle invalid values
@@ -180,7 +263,9 @@ export default function SessionDetailsPage() {
     const secs = totalSeconds % 60
 
     if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs
+        .toString()
+        .padStart(2, '0')}`
     }
     return `${minutes}:${secs.toString().padStart(2, '0')}`
   }
@@ -223,11 +308,17 @@ export default function SessionDetailsPage() {
         </h1>
         <div className="text-sm text-muted-foreground space-y-1">
           <div>
-            Created {formatDistanceToNow(new Date(session.createdAt), { addSuffix: true })}
+            Created{' '}
+            {formatDistanceToNow(new Date(session.createdAt), {
+              addSuffix: true,
+            })}
           </div>
           {session.recordingStartedAt && (
             <div>
-              Started {formatDistanceToNow(new Date(session.recordingStartedAt), { addSuffix: true })}
+              Started{' '}
+              {formatDistanceToNow(new Date(session.recordingStartedAt), {
+                addSuffix: true,
+              })}
             </div>
           )}
           <div className="flex items-center gap-4 mt-2">
@@ -266,10 +357,13 @@ export default function SessionDetailsPage() {
             <div className="flex-1">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-sm text-muted-foreground">
-                  {formatDuration(currentTime)} / {formatDuration(displayDuration)}
+                  {formatDuration(currentTime)} /{' '}
+                  {formatDuration(displayDuration)}
                 </div>
                 {isLoading && (
-                  <div className="text-xs text-muted-foreground">Loading...</div>
+                  <div className="text-xs text-muted-foreground">
+                    Loading...
+                  </div>
                 )}
               </div>
               <input
@@ -277,13 +371,21 @@ export default function SessionDetailsPage() {
                 min="0"
                 max={displayDuration > 0 ? displayDuration : 1}
                 step="0.1"
-                value={Math.min(currentTime, displayDuration > 0 ? displayDuration : 0)}
+                value={Math.min(
+                  currentTime,
+                  displayDuration > 0 ? displayDuration : 0
+                )}
                 onChange={handleSeek}
                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
                 style={{
-                  background: displayDuration > 0
-                    ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(currentTime / displayDuration) * 100}%, #e5e7eb ${(currentTime / displayDuration) * 100}%, #e5e7eb 100%)`
-                    : 'linear-gradient(to right, #e5e7eb 0%, #e5e7eb 100%)'
+                  background:
+                    displayDuration > 0
+                      ? `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${
+                          (currentTime / displayDuration) * 100
+                        }%, #e5e7eb ${
+                          (currentTime / displayDuration) * 100
+                        }%, #e5e7eb 100%)`
+                      : 'linear-gradient(to right, #e5e7eb 0%, #e5e7eb 100%)',
                 }}
                 disabled={!audioElement || isLoading || displayDuration <= 0}
               />
@@ -300,12 +402,12 @@ export default function SessionDetailsPage() {
         </Card>
       )}
 
-      {/* Transcript */}
-      {session.transcript && (
+      {/* Transcript - Show merged transcript from chunks or session transcript */}
+      {(mergedTranscript || session.transcript) && (
         <Card className="p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">Transcript</h2>
           <div className="whitespace-pre-wrap text-sm">
-            {session.transcript}
+            {mergedTranscript || session.transcript}
           </div>
         </Card>
       )}
@@ -314,9 +416,7 @@ export default function SessionDetailsPage() {
       {session.summary && (
         <Card className="p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">Summary</h2>
-          <div className="whitespace-pre-wrap text-sm">
-            {session.summary}
-          </div>
+          <div className="whitespace-pre-wrap text-sm">{session.summary}</div>
         </Card>
       )}
 
@@ -328,9 +428,7 @@ export default function SessionDetailsPage() {
         // First filter: chunks with meaningful audio data
         const chunksWithAudio = chunks.filter(
           (chunk) =>
-            chunk.blob &&
-            chunk.blob.size >= MIN_BLOB_SIZE &&
-            chunk.duration > 0
+            chunk.blob && chunk.blob.size >= MIN_BLOB_SIZE && chunk.duration > 0
         )
 
         // Second filter: filter by cumulative duration not exceeding session duration
@@ -365,7 +463,7 @@ export default function SessionDetailsPage() {
         const validChunks = chunksWithAudio.filter((chunk) => {
           const newCumulative = cumulativeDuration + chunk.duration
           // Only include if cumulative duration doesn't exceed session duration
-          if (newCumulative <= session.duration) {
+          if (session.duration && newCumulative <= session.duration) {
             cumulativeDuration = newCumulative
             return true
           }
@@ -402,4 +500,3 @@ export default function SessionDetailsPage() {
     </div>
   )
 }
-

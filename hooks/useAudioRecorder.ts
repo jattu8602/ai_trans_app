@@ -13,6 +13,7 @@ import {
   getRecordingState,
 } from '@/lib/indexeddb'
 import { getDeviceId } from '@/lib/device'
+import { transcribeAudioFile } from '@/lib/deepgram-file'
 
 interface UseAudioRecorderReturn {
   isRecording: boolean
@@ -41,6 +42,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
   const recorderRef = useRef<AudioRecorder | null>(null)
   const sessionIdRef = useRef<string | null>(null)
+  const pendingChunksRef = useRef<Set<number>>(new Set()) // Track pending chunk operations
 
   // Load persisted state on mount
   useEffect(() => {
@@ -54,13 +56,54 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   // Handle chunk upload
   const handleChunk = useCallback(
     async (chunk: Blob, index: number, duration: number) => {
-      if (!sessionIdRef.current) return
+      // Validate session ID before processing
+      if (!sessionIdRef.current) {
+        console.error(
+          `[useAudioRecorder] Cannot process chunk ${index}: sessionId is null. Skipping chunk.`
+        )
+        return
+      }
+
+      const sessionId = sessionIdRef.current
+      console.log(
+        `[useAudioRecorder] Processing chunk ${index} for session ${sessionId}, duration: ${duration}s`
+      )
+
+      // Track this chunk as pending
+      pendingChunksRef.current.add(index)
 
       try {
+
+        // Transcribe the audio chunk before uploading
+        let chunkTranscript = ''
+
+        // Skip transcription for very short chunks (< 0.5 seconds) to avoid unnecessary API calls
+        // These chunks are likely silence or too short to contain meaningful speech
+        if (duration >= 0.5) {
+          try {
+            console.log(`[useAudioRecorder] Transcribing chunk ${index} (${duration.toFixed(2)}s)...`)
+            chunkTranscript = await transcribeAudioFile(chunk)
+            console.log(`[useAudioRecorder] Chunk ${index} transcribed successfully:`, {
+              transcriptLength: chunkTranscript.length,
+              preview: chunkTranscript.substring(0, 50) + (chunkTranscript.length > 50 ? '...' : ''),
+            })
+          } catch (transcriptionError) {
+            console.error(`[useAudioRecorder] Failed to transcribe chunk ${index}:`, transcriptionError)
+            // Continue with upload even if transcription fails (transcript will be null)
+          }
+        } else {
+          console.log(
+            `[useAudioRecorder] Skipping transcription for chunk ${index} (duration: ${duration.toFixed(2)}s < 0.5s)`
+          )
+        }
+
+        // Use the captured sessionId (don't check sessionIdRef.current as it might be cleared)
+        // The sessionId was captured at the start, so use it directly
+
         // Store chunk in IndexedDB (with error handling)
         const storeResult = await storeChunk({
-          id: `${sessionIdRef.current}-${index}`,
-          sessionId: sessionIdRef.current,
+          id: `${sessionId}-${index}`,
+          sessionId: sessionId,
           chunkIndex: index,
           blob: chunk,
           timestamp: Date.now(),
@@ -70,27 +113,33 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           console.warn('IndexedDB storage failed, using server-only:', storeResult.error)
         }
 
-        // Upload chunk to server (always attempt, even if IndexedDB failed)
+        // Upload chunk to server with transcript (always attempt, even if IndexedDB failed)
         const deviceId = getDeviceId()
         const formData = new FormData()
         formData.append('chunk', chunk, `chunk-${index}.webm`)
         formData.append('chunkIndex', index.toString())
         formData.append('duration', duration.toFixed(2)) // Actual duration in seconds
         formData.append('deviceId', deviceId)
+        if (chunkTranscript) {
+          formData.append('transcript', chunkTranscript)
+        }
 
-        const response = await fetch(
-          `/api/sessions/${sessionIdRef.current}/chunks`,
-          {
-            method: 'POST',
-            body: formData,
-          },
-        )
+        console.log(`[useAudioRecorder] Uploading chunk ${index} to server for session ${sessionId}...`)
+        const response = await fetch(`/api/sessions/${sessionId}/chunks`, {
+          method: 'POST',
+          body: formData,
+        })
 
         if (!response.ok) {
           console.error('Failed to upload chunk:', response.statusText)
+        } else {
+          console.log(`[useAudioRecorder] Chunk ${index} uploaded successfully`)
         }
       } catch (error) {
         console.error('Error handling chunk:', error)
+      } finally {
+        // Remove from pending chunks
+        pendingChunksRef.current.delete(index)
       }
     },
     [],
@@ -100,7 +149,14 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const start = useCallback(
     async (mode: RecordingMode, sessionId: string) => {
       try {
+        // Validate session ID
+        if (!sessionId || sessionId === 'null' || sessionId === 'undefined') {
+          throw new Error(`Invalid session ID: ${sessionId}`)
+        }
+
+        // Set session ID before creating recorder to ensure it's available for chunks
         sessionIdRef.current = sessionId
+        console.log(`[useAudioRecorder] Starting recording with session ID: ${sessionId}`)
 
         const recorder = new AudioRecorder({
           mode,
@@ -165,14 +221,34 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
       const finalBlob = await recorderRef.current.stop()
 
+      // Wait for all pending chunks to complete (with timeout)
+      const maxWaitTime = 10000 // 10 seconds max wait
+      const startWait = Date.now()
+      while (pendingChunksRef.current.size > 0 && Date.now() - startWait < maxWaitTime) {
+        console.log(
+          `[useAudioRecorder] Waiting for ${pendingChunksRef.current.size} pending chunks to complete...`
+        )
+        await new Promise((resolve) => setTimeout(resolve, 500)) // Check every 500ms
+      }
+
+      if (pendingChunksRef.current.size > 0) {
+        console.warn(
+          `[useAudioRecorder] Some chunks (${pendingChunksRef.current.size}) are still pending after timeout, proceeding with cleanup`
+        )
+      }
+
       // Clean up persisted state
-      if (sessionIdRef.current) {
-        const deleteResult = await deleteRecordingState(sessionIdRef.current)
+      const sessionId = sessionIdRef.current
+      if (sessionId) {
+        const deleteResult = await deleteRecordingState(sessionId)
         if (!deleteResult.success) {
           console.warn('Failed to delete recording state:', deleteResult.error)
         }
-        sessionIdRef.current = null
       }
+
+      // Clear session ID and pending chunks after all operations complete
+      sessionIdRef.current = null
+      pendingChunksRef.current.clear()
 
       recorderRef.current = null
       return finalBlob

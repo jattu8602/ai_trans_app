@@ -8,8 +8,14 @@ export type RecordingMode = 'mic' | 'system'
 export interface RecordingOptions {
   mode: RecordingMode
   chunkDuration: number // in milliseconds (default: 30000 = 30s)
-  onChunk?: (chunk: Blob, index: number, duration: number) => void
+  onChunk?: (
+    chunk: Blob,
+    index: number,
+    duration: number,
+    transcript?: string
+  ) => void
   onError?: (error: Error) => void
+  onTranscriptUpdate?: (transcript: string) => void // Real-time transcript updates
 }
 
 export interface RecordingState {

@@ -16,14 +16,13 @@ export function SessionSidebar({
   onRecordNew,
   onSelectSession,
 }: SessionSidebarProps) {
-  const { sessions, isLoading } = useSessions()
+  // In development, only fetch 2 sessions for faster loading
+  const isDevelopment = process.env.NODE_ENV === 'development'
+  const limit = isDevelopment ? 2 : undefined
+  const { sessions, isLoading } = useSessions(limit)
 
-  // In development, only show last 2 sessions for faster loading
-  // Sessions are already sorted by createdAt DESC (newest first)
-  const displaySessions = useMemo(() => {
-    const isDevelopment = process.env.NODE_ENV === 'development'
-    return isDevelopment ? sessions.slice(0, 2) : sessions
-  }, [sessions])
+  // Sessions are already sorted by createdAt DESC (newest first) from API
+  const displaySessions = sessions
 
   const getStatusIcon = (status: string) => {
     switch (status) {

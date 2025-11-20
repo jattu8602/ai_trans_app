@@ -18,6 +18,7 @@ export async function POST(
     const chunkIndexStr = formData.get('chunkIndex') as string
     const durationStr = formData.get('duration') as string
     const deviceId = formData.get('deviceId') as string
+    const transcript = formData.get('transcript') as string | null
 
     if (!chunk || !chunkIndexStr || !deviceId) {
       return NextResponse.json(
@@ -120,6 +121,7 @@ export async function POST(
         data: {
           audioData: base64Data,
           duration,
+          transcript: transcript || null,
           updatedAt: new Date(),
         },
       })
@@ -133,6 +135,7 @@ export async function POST(
           chunkIndex,
           audioData: base64Data,
           duration,
+          transcript: transcript || null,
           timestamp: new Date(),
         },
       })
@@ -232,12 +235,14 @@ export async function GET(
           duration: number
           timestamp: Date
           audioData: string | null
+          transcript: string | null
         }) => ({
           id: chunk.id,
           chunkIndex: chunk.chunkIndex,
           duration: chunk.duration,
           timestamp: chunk.timestamp,
           audioData: chunk.audioData, // Base64 encoded
+          transcript: chunk.transcript, // Transcript text
         })
       ),
     })

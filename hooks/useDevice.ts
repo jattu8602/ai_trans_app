@@ -32,14 +32,12 @@ export function useDevice(): DeviceData {
 
   const initialize = async () => {
     try {
-      setIsLoading(true)
       setError(null)
 
-      // Get or create device ID
+      // Get device ID (always use getDeviceId() to ensure we have the latest)
       const id = getDeviceId()
-      setDeviceId(id)
 
-      // Fetch or create user
+      // Fetch or create user (background operation)
       const response = await fetch('/api/users/device', {
         method: 'POST',
         headers: {
@@ -58,8 +56,7 @@ export function useDevice(): DeviceData {
       const message = err instanceof Error ? err.message : 'Unknown error'
       setError(message)
       console.error('Error initializing device:', err)
-    } finally {
-      setIsLoading(false)
+      // Don't throw - this is a background operation
     }
   }
 
@@ -67,12 +64,18 @@ export function useDevice(): DeviceData {
     // Check if device ID exists
     const existingId = getDeviceIdOrNull()
     if (existingId) {
+      // Set deviceId immediately (non-blocking)
       setDeviceId(existingId)
+      setIsLoading(false) // Don't block - deviceId is available
       // Initialize user in background
-      initialize()
+      initialize().catch(console.error)
     } else {
-      // Generate new device ID and initialize
-      initialize()
+      // Generate new device ID immediately
+      const id = getDeviceId()
+      setDeviceId(id)
+      setIsLoading(false) // Don't block - deviceId is available
+      // Initialize user in background
+      initialize().catch(console.error)
     }
   }, [])
 

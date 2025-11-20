@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     const deviceId = searchParams.get('deviceId')
+    const limitParam = searchParams.get('limit')
 
     if (!deviceId) {
       return NextResponse.json(
@@ -47,6 +48,15 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    // Parse limit if provided
+    let limit: number | undefined
+    if (limitParam) {
+      const parsedLimit = parseInt(limitParam, 10)
+      if (!isNaN(parsedLimit) && parsedLimit > 0) {
+        limit = parsedLimit
+      }
+    }
+
     // Find user by deviceId
     const user = await prisma.user.findUnique({
       where: { deviceId },
@@ -59,10 +69,11 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Fetch all sessions for this user
+    // Fetch sessions for this user with optional limit
     const sessions = await prisma.session.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
+      take: limit, // Limit results if provided
     })
 
     return NextResponse.json({

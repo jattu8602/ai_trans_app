@@ -26,8 +26,9 @@ interface UseSessionsReturn {
 
 /**
  * React hook for session management with localStorage caching and DB sync
+ * @param limit - Optional limit for number of sessions to fetch from server
  */
-export function useSessions(): UseSessionsReturn {
+export function useSessions(limit?: number): UseSessionsReturn {
   const [sessions, setSessions] = useState<SessionData[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -36,7 +37,10 @@ export function useSessions(): UseSessionsReturn {
   const fetchSessions = useCallback(async (): Promise<SessionData[]> => {
     try {
       const deviceId = getDeviceId()
-      const response = await fetch(`/api/sessions?deviceId=${deviceId}`)
+      const url = limit
+        ? `/api/sessions?deviceId=${deviceId}&limit=${limit}`
+        : `/api/sessions?deviceId=${deviceId}`
+      const response = await fetch(url)
 
       if (!response.ok) {
         throw new Error('Failed to fetch sessions')
@@ -57,20 +61,20 @@ export function useSessions(): UseSessionsReturn {
       console.error('Error fetching sessions:', err)
       throw err
     }
-  }, [])
+  }, [limit])
 
   // Load sessions on mount
   useEffect(() => {
     const loadSessions = async () => {
       try {
-        setIsLoading(true)
         setError(null)
 
-        // Load from cache first (instant)
+        // Load from cache first (instant) - show immediately
         const cached = getCachedSessions()
         setSessions(cached)
+        setIsLoading(false) // Don't block UI - show cached data immediately
 
-        // Sync from server if needed
+        // Sync from server in background
         if (shouldSync(5)) {
           const synced = await syncFromServer(fetchSessions)
           setSessions(synced)
@@ -88,8 +92,7 @@ export function useSessions(): UseSessionsReturn {
         // Fallback to cached sessions
         const cached = getCachedSessions()
         setSessions(cached)
-      } finally {
-        setIsLoading(false)
+        setIsLoading(false) // Ensure loading is false even on error
       }
     }
 

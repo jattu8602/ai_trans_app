@@ -19,7 +19,7 @@ export default function Home() {
     null
   )
 
-  const { deviceId, isLoading: deviceLoading } = useDevice()
+  const { deviceId } = useDevice()
   const { createSession, updateSession } = useSessions()
   const {
     isRecording,
@@ -182,16 +182,6 @@ export default function Home() {
       console.error('Error stopping recording:', error)
       alert('Failed to stop recording')
     }
-  }
-
-  if (deviceLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="text-lg">Initializing...</div>
-        </div>
-      </div>
-    )
   }
 
   return (

@@ -46,6 +46,7 @@ model AudioChunk {
   chunkIndex  Int      // 0-based index of the chunk
   audioUrl    String?  // URL to stored audio file/blob
   audioData   String?  // Base64 encoded audio data (for small chunks)
+  transcript  String?  // Transcript text for this chunk
   duration    Float    // Duration in seconds (typically 30s)
   timestamp   DateTime  @default(now()) // When this chunk was recorded
   createdAt   DateTime  @default(now())
