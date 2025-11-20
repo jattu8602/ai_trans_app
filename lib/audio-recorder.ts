@@ -27,6 +27,7 @@ export interface RecordingState {
 export class AudioRecorder {
   private mediaRecorder: MediaRecorder | null = null
   private audioStream: MediaStream | null = null
+  private audioContext: AudioContext | null = null // For mixing system audio + mic
   private chunks: Blob[] = []
   private chunkIndex = 0
   private startTime = 0
@@ -158,39 +159,86 @@ export class AudioRecorder {
         }
       }
 
-      // Step 2: Get microphone audio
+      // Step 2: Get microphone audio (mandatory for system mode)
+      console.log(
+        '[AudioRecorder] Requesting microphone for system audio mode...'
+      )
       try {
         micStream = await this.requestMicrophone()
+        console.log('[AudioRecorder] Microphone obtained:', {
+          tracks: micStream.getAudioTracks().length,
+          trackIds: micStream.getAudioTracks().map((t) => t.id),
+        })
       } catch (micError) {
-        console.warn(
-          'Failed to get microphone, continuing with system audio only:',
-          micError
+        const errorMessage =
+          micError instanceof Error ? micError.message : 'Unknown error'
+        console.error(
+          '[AudioRecorder] Microphone request failed:',
+          errorMessage
         )
-        // If mic fails, continue with just system audio
+
+        // Don't silently fail - user needs to know microphone is required
+        if (displayStream) {
+          displayStream.getTracks().forEach((track) => track.stop())
+        }
+        throw new Error(
+          `Microphone access is required for "Complete System Voice" mode. ` +
+            `Please allow microphone access and try again. Error: ${errorMessage}`
+        )
       }
 
-      // Step 3: Combine both streams
-      if (micStream && micStream.getAudioTracks().length > 0 && displayStream) {
-        // Create a new stream with both audio tracks
-        const combinedStream = new MediaStream()
-
-        // Add system/tab audio tracks
-        displayStream.getAudioTracks().forEach((track) => {
-          combinedStream.addTrack(track)
-        })
-
-        // Add microphone audio tracks
-        micStream.getAudioTracks().forEach((track) => {
-          combinedStream.addTrack(track)
-        })
-
-        return combinedStream
-      } else if (displayStream) {
-        // Only system audio available
-        return displayStream
-      } else {
-        throw new Error('Failed to get any audio streams')
+      // Step 3: Mix both streams using AudioContext
+      if (!micStream || micStream.getAudioTracks().length === 0) {
+        if (displayStream) {
+          displayStream.getTracks().forEach((track) => track.stop())
+        }
+        throw new Error('Microphone stream is empty')
       }
+
+      if (!displayStream || displayStream.getAudioTracks().length === 0) {
+        if (micStream) {
+          micStream.getTracks().forEach((track) => track.stop())
+        }
+        throw new Error('System audio stream is empty')
+      }
+
+      console.log(
+        '[AudioRecorder] Mixing system audio and microphone using AudioContext...'
+      )
+
+      // Use AudioContext to properly mix both streams into a single track
+      this.audioContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)()
+      const destination = this.audioContext.createMediaStreamDestination()
+
+      // Create source nodes for both streams
+      const systemAudioSource =
+        this.audioContext.createMediaStreamSource(displayStream)
+      const micAudioSource =
+        this.audioContext.createMediaStreamSource(micStream)
+
+      // Optional: Create gain nodes for volume control (both at 1.0 = full volume)
+      const systemGain = this.audioContext.createGain()
+      systemGain.gain.value = 1.0
+
+      const micGain = this.audioContext.createGain()
+      micGain.gain.value = 1.0
+
+      // Connect: source -> gain -> destination
+      systemAudioSource.connect(systemGain)
+      systemGain.connect(destination)
+
+      micAudioSource.connect(micGain)
+      micGain.connect(destination)
+
+      console.log('[AudioRecorder] Streams mixed successfully:', {
+        outputTracks: destination.stream.getAudioTracks().length,
+        systemTracks: displayStream.getAudioTracks().length,
+        micTracks: micStream.getAudioTracks().length,
+      })
+
+      // Return the mixed stream (single audio track with both sources)
+      return destination.stream
     } catch (error) {
       // Clean up any streams that were created
       if (displayStream) {
@@ -581,6 +629,14 @@ export class AudioRecorder {
     if (this.audioStream) {
       this.audioStream.getTracks().forEach((track) => track.stop())
       this.audioStream = null
+    }
+
+    // Close AudioContext if it was created for mixing
+    if (this.audioContext) {
+      this.audioContext.close().catch((error) => {
+        console.warn('[AudioRecorder] Error closing AudioContext:', error)
+      })
+      this.audioContext = null
     }
 
     this.mediaRecorder = null
