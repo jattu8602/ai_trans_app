@@ -10,27 +10,48 @@ datasource db {
 }
 
 model User {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  name      String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  sessions  Session[]
+  id          String    @id @default(cuid())
+  deviceId    String    @unique
+  name        String?
+  lastSyncedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  sessions    Session[]
 
+  @@index([deviceId])
   @@map("users")
 }
 
 model Session {
-  id          String   @id @default(cuid())
+  id          String      @id @default(cuid())
   userId      String
   title       String?
   transcript  String?
   summary     String?
-  status      String   @default("pending") // pending, recording, paused, processing, completed
-  duration    Int?     // duration in seconds
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      String      @default("pending") // pending, recording, paused, processing, completed
+  duration    Int?        // duration in seconds
+  chunksCount Int         @default(0)
+  recordingStartedAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks      AudioChunk[]
 
   @@map("sessions")
+}
+
+model AudioChunk {
+  id          String   @id @default(cuid())
+  sessionId   String
+  chunkIndex  Int      // 0-based index of the chunk
+  audioUrl    String?  // URL to stored audio file/blob
+  audioData   String?  // Base64 encoded audio data (for small chunks)
+  duration    Float    // Duration in seconds (typically 30s)
+  timestamp   DateTime  @default(now()) // When this chunk was recorded
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, chunkIndex])
+  @@map("audio_chunks")
 }
