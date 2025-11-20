@@ -88,6 +88,11 @@ export default function Home() {
     setShowPopup(true)
   }
 
+  const handleQuickRecord = async () => {
+    // Quick record with mic only - no popup
+    await handleModeSelect('mic')
+  }
+
   const handleModeSelect = async (mode: 'mic' | 'system') => {
     if (!deviceId) {
       alert('Device not initialized. Please wait...')
@@ -203,16 +208,34 @@ export default function Home() {
             <p className="text-muted-foreground text-lg">
               AI-Powered Audio Transcription
             </p>
-            <Button
-              size="lg"
-              onClick={handleStartClick}
-              className="h-20 w-64 text-xl gap-3"
-            >
-              <Mic className="h-8 w-8" />
-              Start Recording
-            </Button>
+            <div className="flex flex-col gap-4 items-center">
+              <Button
+                size="lg"
+                onClick={handleQuickRecord}
+                className="h-20 w-64 text-xl gap-3"
+                disabled={isStarting}
+              >
+                <Mic className="h-8 w-8" />
+                Quick Record (Mic)
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={handleStartClick}
+                className="h-16 w-64 text-lg gap-2"
+                disabled={isStarting}
+              >
+                <Mic className="h-6 w-6" />
+                Advanced Options
+              </Button>
+            </div>
             {recorderError && (
               <div className="text-red-500 text-sm mt-4">{recorderError}</div>
+            )}
+            {isStarting && (
+              <div className="text-muted-foreground text-sm">
+                Starting recording...
+              </div>
             )}
           </div>
         )}

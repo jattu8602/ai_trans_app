@@ -53,7 +53,45 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     loadPersistedState()
   }, [])
 
-  // Handle chunk upload
+  // Update chunk transcript in DB (async helper)
+  const updateChunkTranscript = useCallback(
+    async (sessionId: string, chunkIndex: number, transcript: string) => {
+      try {
+        const deviceId = getDeviceId()
+        const formData = new FormData()
+        formData.append('chunkIndex', chunkIndex.toString())
+        formData.append('transcript', transcript)
+        formData.append('deviceId', deviceId)
+
+        const response = await fetch(
+          `/api/sessions/${sessionId}/chunks/${chunkIndex}/transcript`,
+          {
+            method: 'PUT',
+            body: formData,
+          }
+        )
+
+        if (!response.ok) {
+          console.error(
+            `[useAudioRecorder] Failed to update transcript for chunk ${chunkIndex}:`,
+            response.statusText
+          )
+        } else {
+          console.log(
+            `[useAudioRecorder] Transcript updated for chunk ${chunkIndex}`
+          )
+        }
+      } catch (error) {
+        console.error(
+          `[useAudioRecorder] Error updating transcript for chunk ${chunkIndex}:`,
+          error
+        )
+      }
+    },
+    []
+  )
+
+  // Handle chunk upload (async/parallel transcription)
   const handleChunk = useCallback(
     async (chunk: Blob, index: number, duration: number) => {
       // Validate session ID before processing
@@ -73,33 +111,6 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       pendingChunksRef.current.add(index)
 
       try {
-
-        // Transcribe the audio chunk before uploading
-        let chunkTranscript = ''
-
-        // Skip transcription for very short chunks (< 0.5 seconds) to avoid unnecessary API calls
-        // These chunks are likely silence or too short to contain meaningful speech
-        if (duration >= 0.5) {
-          try {
-            console.log(`[useAudioRecorder] Transcribing chunk ${index} (${duration.toFixed(2)}s)...`)
-            chunkTranscript = await transcribeAudioFile(chunk)
-            console.log(`[useAudioRecorder] Chunk ${index} transcribed successfully:`, {
-              transcriptLength: chunkTranscript.length,
-              preview: chunkTranscript.substring(0, 50) + (chunkTranscript.length > 50 ? '...' : ''),
-            })
-          } catch (transcriptionError) {
-            console.error(`[useAudioRecorder] Failed to transcribe chunk ${index}:`, transcriptionError)
-            // Continue with upload even if transcription fails (transcript will be null)
-          }
-        } else {
-          console.log(
-            `[useAudioRecorder] Skipping transcription for chunk ${index} (duration: ${duration.toFixed(2)}s < 0.5s)`
-          )
-        }
-
-        // Use the captured sessionId (don't check sessionIdRef.current as it might be cleared)
-        // The sessionId was captured at the start, so use it directly
-
         // Store chunk in IndexedDB (with error handling)
         const storeResult = await storeChunk({
           id: `${sessionId}-${index}`,
@@ -113,27 +124,67 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           console.warn('IndexedDB storage failed, using server-only:', storeResult.error)
         }
 
-        // Upload chunk to server with transcript (always attempt, even if IndexedDB failed)
+        // Upload chunk to server IMMEDIATELY (without transcript)
         const deviceId = getDeviceId()
         const formData = new FormData()
         formData.append('chunk', chunk, `chunk-${index}.webm`)
         formData.append('chunkIndex', index.toString())
         formData.append('duration', duration.toFixed(2)) // Actual duration in seconds
         formData.append('deviceId', deviceId)
-        if (chunkTranscript) {
-          formData.append('transcript', chunkTranscript)
-        }
+        // No transcript - will be added later
 
-        console.log(`[useAudioRecorder] Uploading chunk ${index} to server for session ${sessionId}...`)
-        const response = await fetch(`/api/sessions/${sessionId}/chunks`, {
+        console.log(
+          `[useAudioRecorder] Uploading chunk ${index} to server (without transcript)...`
+        )
+        const uploadResponse = await fetch(`/api/sessions/${sessionId}/chunks`, {
           method: 'POST',
           body: formData,
         })
 
-        if (!response.ok) {
-          console.error('Failed to upload chunk:', response.statusText)
+        if (!uploadResponse.ok) {
+          console.error('Failed to upload chunk:', uploadResponse.statusText)
         } else {
           console.log(`[useAudioRecorder] Chunk ${index} uploaded successfully`)
+        }
+
+        // Start transcription in PARALLEL (don't await - fire and forget)
+        // Skip transcription for very short chunks (< 0.5 seconds)
+        if (duration >= 0.5) {
+          // Transcribe in background
+          transcribeAudioFile(chunk)
+            .then((chunkTranscript) => {
+              if (chunkTranscript) {
+                console.log(
+                  `[useAudioRecorder] Chunk ${index} transcribed successfully:`,
+                  {
+                    transcriptLength: chunkTranscript.length,
+                    preview:
+                      chunkTranscript.substring(0, 50) +
+                      (chunkTranscript.length > 50 ? '...' : ''),
+                  }
+                )
+                // Update chunk with transcript
+                updateChunkTranscript(sessionId, index, chunkTranscript).catch(
+                  (err) => {
+                    console.error(
+                      `[useAudioRecorder] Failed to update chunk ${index} transcript:`,
+                      err
+                    )
+                  }
+                )
+              }
+            })
+            .catch((transcriptionError) => {
+              console.error(
+                `[useAudioRecorder] Failed to transcribe chunk ${index}:`,
+                transcriptionError
+              )
+              // Chunk is already saved, transcription failure is not critical
+            })
+        } else {
+          console.log(
+            `[useAudioRecorder] Skipping transcription for chunk ${index} (duration: ${duration.toFixed(2)}s < 0.5s)`
+          )
         }
       } catch (error) {
         console.error('Error handling chunk:', error)
@@ -142,7 +193,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         pendingChunksRef.current.delete(index)
       }
     },
-    [],
+    [updateChunkTranscript]
   )
 
   // Start recording
