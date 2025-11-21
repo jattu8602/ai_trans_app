@@ -57,10 +57,16 @@ export async function POST(request: NextRequest) {
     const deepgram = createClient(apiKey)
 
     // Prepare transcription options
+    // Support both English and Hindi (auto-detect)
+    // Deepgram supports: 'en' (English), 'hi' (Hindi)
+    // For mixed content (Hinglish), we can either:
+    // 1. Use 'hi' for Hindi (will also handle some English)
+    // 2. Use language detection (detect_language: true)
+    // Using 'hi' as primary since user wants Hindi support, but it handles English too
     const transcriptionOptions: any = {
       model: 'nova-2',
-      language: 'en', // Primary language (English)
-      // Deepgram will auto-detect Hindi/Hinglish
+      language: 'hi', // Hindi (also handles English in mixed content)
+      detect_language: true, // Enable auto-detection for mixed English/Hindi (Hinglish)
       smart_format: true,
       punctuate: true,
       diarize: false,
@@ -70,10 +76,15 @@ export async function POST(request: NextRequest) {
     // Note: Deepgram's transcribeFile doesn't directly accept mime type in options,
     // but it auto-detects from the file content. We'll rely on that.
 
-    console.log('[API /transcribe] Sending to Deepgram...', {
-      bufferSize: buffer.length,
-      options: transcriptionOptions,
-    })
+    console.log(
+      '[API /transcribe] Sending to Deepgram (Hindi + English support)...',
+      {
+        bufferSize: buffer.length,
+        options: transcriptionOptions,
+        languageMode:
+          'Hindi with auto-detection (supports English/Hindi/Hinglish)',
+      }
+    )
 
     // Add timeout wrapper for Deepgram API call (30 seconds max)
     const transcriptionPromise = deepgram.listen.prerecorded.transcribeFile(
