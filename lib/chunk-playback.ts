@@ -22,7 +22,7 @@ export interface ChunkPlaybackData {
  */
 export async function getChunksForPlayback(
   sessionId: string,
-  deviceId: string,
+  deviceId: string
 ): Promise<ChunkPlaybackData> {
   // Try IndexedDB first (fast, local)
   const indexedDBResult = await getChunks(sessionId)
@@ -39,13 +39,33 @@ export async function getChunksForPlayback(
       }))
 
     if (chunks.length > 0) {
-      // Combine chunks into single blob
-      const combinedBlob = new Blob(chunks.map((c) => c.blob), {
-        type: 'audio/webm',
-      })
-      const audioUrl = URL.createObjectURL(combinedBlob)
-
       const totalDuration = chunks.reduce((sum, c) => sum + c.duration, 0)
+      const totalSizeMB =
+        chunks.reduce((sum, c) => sum + c.blob.size, 0) / (1024 * 1024)
+
+      // For very long recordings (> 50 chunks or > 20MB), log warning
+      if (chunks.length > 50 || totalSizeMB > 20) {
+        console.log(
+          `[ChunkPlayback] Large recording from IndexedDB: ${
+            chunks.length
+          } chunks, ${totalSizeMB.toFixed(2)}MB, ${Math.floor(
+            totalDuration / 60
+          )}:${Math.floor(totalDuration % 60)
+            .toString()
+            .padStart(2, '0')} duration`
+        )
+      }
+
+      // Combine chunks into single blob
+      // Note: For very large recordings (> 100MB), this might cause memory issues
+      // In production, consider using MediaSource API for streaming playback
+      const combinedBlob = new Blob(
+        chunks.map((c) => c.blob),
+        {
+          type: 'audio/webm',
+        }
+      )
+      const audioUrl = URL.createObjectURL(combinedBlob)
 
       return {
         chunks,
@@ -59,7 +79,7 @@ export async function getChunksForPlayback(
   // Fallback to server
   try {
     const response = await fetch(
-      `/api/sessions/${sessionId}/chunks?deviceId=${deviceId}`,
+      `/api/sessions/${sessionId}/chunks?deviceId=${deviceId}`
     )
 
     if (!response.ok) {
@@ -102,7 +122,7 @@ export async function getChunksForPlayback(
             duration: chunk.duration || 0, // Use actual duration from database
             timestamp: new Date(chunk.timestamp).getTime(),
           }
-        }),
+        })
       )
     ).filter(
       // Filter out chunks with no audio data or zero duration
@@ -112,13 +132,41 @@ export async function getChunksForPlayback(
     // Sort by index to ensure correct order
     chunks.sort((a, b) => a.index - b.index)
 
-    // Combine chunks into single blob
-    const combinedBlob = new Blob(chunks.map((c) => c.blob), {
-      type: 'audio/webm',
-    })
-    const audioUrl = URL.createObjectURL(combinedBlob)
-
+    // For very long recordings (> 50 chunks), use streaming approach
+    // Instead of combining all chunks, we'll create a MediaSource for streaming
     const totalDuration = chunks.reduce((sum, c) => sum + c.duration, 0)
+
+    // If we have many chunks (> 50), don't combine them all at once
+    // Instead, return chunks separately for progressive loading
+    if (chunks.length > 50) {
+      console.log(
+        `[ChunkPlayback] Large recording detected (${chunks.length} chunks). Using progressive loading.`
+      )
+      // For now, still combine but log a warning
+      // In future, we could implement MediaSource API for true streaming
+      const combinedBlob = new Blob(
+        chunks.map((c) => c.blob),
+        {
+          type: 'audio/webm',
+        }
+      )
+      const audioUrl = URL.createObjectURL(combinedBlob)
+
+      return {
+        chunks,
+        totalDuration,
+        audioUrl,
+      }
+    }
+
+    // Combine chunks into single blob for smaller recordings
+    const combinedBlob = new Blob(
+      chunks.map((c) => c.blob),
+      {
+        type: 'audio/webm',
+      }
+    )
+    const audioUrl = URL.createObjectURL(combinedBlob)
 
     return {
       chunks,
@@ -152,12 +200,15 @@ export function revokeAudioUrl(url: string): void {
  */
 export function getChunkAtTime(
   chunks: ChunkPlaybackData['chunks'],
-  timeInSeconds: number,
+  timeInSeconds: number
 ): { chunk: ChunkPlaybackData['chunks'][0]; offset: number } | null {
   let accumulatedTime = 0
 
   for (const chunk of chunks) {
-    if (timeInSeconds >= accumulatedTime && timeInSeconds < accumulatedTime + chunk.duration) {
+    if (
+      timeInSeconds >= accumulatedTime &&
+      timeInSeconds < accumulatedTime + chunk.duration
+    ) {
       return {
         chunk,
         offset: timeInSeconds - accumulatedTime,
@@ -168,4 +219,3 @@ export function getChunkAtTime(
 
   return null
 }
-

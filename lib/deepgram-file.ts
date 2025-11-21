@@ -42,13 +42,34 @@ export async function transcribeAudioFile(audioBlob: Blob): Promise<string> {
       extension,
     })
 
-    const response = await fetch('/api/transcribe', {
-      method: 'POST',
-      body: formData,
-    })
+    // Add timeout to fetch request (28 seconds - before server timeout)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 28000)
+
+    let response: Response
+    try {
+      response = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+    } catch (fetchError) {
+      clearTimeout(timeoutId)
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+        console.warn('[Deepgram File] Transcription request timeout')
+        return '' // Return empty transcript on timeout
+      }
+      throw fetchError
+    }
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
+      // If it's a warning (400/408), return empty transcript instead of throwing
+      if (errorData.warning) {
+        console.warn('[Deepgram File] Transcription warning:', errorData.warning)
+        return errorData.transcript || ''
+      }
       throw new Error(
         errorData.error || `Transcription API error: ${response.statusText}`
       )

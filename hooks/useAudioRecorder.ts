@@ -148,19 +148,42 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         }
 
         // Start transcription in PARALLEL (don't await - fire and forget)
-        // Skip transcription for very short chunks (< 0.5 seconds)
-        if (duration >= 0.5) {
-          // Transcribe in background
-          transcribeAudioFile(chunk)
+        // Skip transcription for very short chunks (< 0.5 seconds) or very large chunks (> 1MB)
+        // Also skip if we have too many pending transcriptions (to avoid overwhelming the system)
+        const chunkSizeMB = chunk.size / (1024 * 1024)
+        const maxPendingTranscriptions = 20 // Limit concurrent transcriptions
+        const shouldTranscribe =
+          duration >= 0.5 &&
+          chunk.size > 100 &&
+          chunkSizeMB < 1.5 &&
+          pendingChunksRef.current.size < maxPendingTranscriptions
+
+        if (shouldTranscribe) {
+          // Transcribe in background with timeout
+          const transcriptionPromise = transcribeAudioFile(chunk)
+          const timeoutPromise = new Promise<string>((resolve) => {
+            setTimeout(() => {
+              console.warn(
+                `[useAudioRecorder] Transcription timeout for chunk ${index} (${chunkSizeMB.toFixed(2)}MB), skipping`
+              )
+              resolve('') // Return empty transcript on timeout
+            }, 25000) // 25 second timeout (before server's 30s timeout)
+          })
+
+          Promise.race([transcriptionPromise, timeoutPromise])
             .then((chunkTranscript) => {
               if (chunkTranscript) {
                 console.log(
-                  `[useAudioRecorder] Chunk ${index} transcribed successfully:`,
+                  `[useAudioRecorder] ✅ Chunk ${index} transcribed successfully:`,
                   {
+                    chunkIndex: index,
+                    sessionId: sessionId,
                     transcriptLength: chunkTranscript.length,
+                    wordCount: chunkTranscript.split(/\s+/).length,
                     preview:
-                      chunkTranscript.substring(0, 50) +
-                      (chunkTranscript.length > 50 ? '...' : ''),
+                      chunkTranscript.substring(0, 100) +
+                      (chunkTranscript.length > 100 ? '...' : ''),
+                    fullTranscript: chunkTranscript, // Log full transcript for debugging
                   }
                 )
                 // Update chunk with transcript
@@ -172,6 +195,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
                     )
                   }
                 )
+              } else {
+                console.log(
+                  `[useAudioRecorder] ⚠️ Chunk ${index} transcription returned empty (silence or no speech)`
+                )
               }
             })
             .catch((transcriptionError) => {
@@ -182,9 +209,19 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
               // Chunk is already saved, transcription failure is not critical
             })
         } else {
-          console.log(
-            `[useAudioRecorder] Skipping transcription for chunk ${index} (duration: ${duration.toFixed(2)}s < 0.5s)`
-          )
+          if (duration < 0.5) {
+            console.log(
+              `[useAudioRecorder] Skipping transcription for chunk ${index} (duration: ${duration.toFixed(2)}s < 0.5s)`
+            )
+          } else if (chunk.size <= 100) {
+            console.log(
+              `[useAudioRecorder] Skipping transcription for chunk ${index} (size: ${chunk.size} bytes, too small)`
+            )
+          } else if (chunkSizeMB >= 1.5) {
+            console.log(
+              `[useAudioRecorder] Skipping transcription for chunk ${index} (size: ${chunkSizeMB.toFixed(2)}MB, too large - likely to timeout)`
+            )
+          }
         }
       } catch (error) {
         console.error('Error handling chunk:', error)

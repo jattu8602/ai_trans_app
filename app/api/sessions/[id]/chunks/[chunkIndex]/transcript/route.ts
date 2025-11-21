@@ -80,6 +80,16 @@ export async function PUT(
       )
     }
 
+    // Log transcript before saving
+    console.log(`[API /chunks/[chunkIndex]/transcript] 💾 Saving transcript for chunk ${chunkIndex} (session: ${sessionId}):`, {
+      chunkIndex,
+      sessionId,
+      transcriptLength: transcript.length,
+      wordCount: transcript.split(/\s+/).length,
+      preview: transcript.substring(0, 100) + (transcript.length > 100 ? '...' : ''),
+      fullTranscript: transcript, // Log full transcript for debugging
+    })
+
     // Update chunk with transcript
     const updatedChunk = await prisma.audioChunk.update({
       where: { id: chunkId },
@@ -96,7 +106,7 @@ export async function PUT(
         transcript: { not: null },
       },
       orderBy: { chunkIndex: 'asc' },
-      select: { transcript: true },
+      select: { transcript: true, chunkIndex: true },
     })
 
     const mergedTranscript = allChunks
@@ -106,10 +116,22 @@ export async function PUT(
       .trim()
 
     if (mergedTranscript) {
+      console.log(`[API /chunks/[chunkIndex]/transcript] 🔗 Merged session transcript (session: ${sessionId}):`, {
+        sessionId,
+        totalChunks: allChunks.length,
+        chunksWithTranscript: allChunks.filter(c => c.transcript).length,
+        mergedLength: mergedTranscript.length,
+        mergedWordCount: mergedTranscript.split(/\s+/).length,
+        preview: mergedTranscript.substring(0, 200) + (mergedTranscript.length > 200 ? '...' : ''),
+        fullMergedTranscript: mergedTranscript, // Log full merged transcript for debugging
+      })
+
       await prisma.session.update({
         where: { id: sessionId },
         data: { transcript: mergedTranscript },
       })
+    } else {
+      console.log(`[API /chunks/[chunkIndex]/transcript] ⚠️ No merged transcript (no chunks with transcripts)`)
     }
 
     return NextResponse.json({

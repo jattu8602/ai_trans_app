@@ -67,7 +67,7 @@ export async function POST(
     const chunkIndex = parseInt(chunkIndexStr, 10)
     const duration = parseFloat(durationStr || '30')
 
-    // Validate chunk index is sequential
+    // Validate chunk index is sequential (more lenient for retries)
     const existingChunks = await prisma.audioChunk.findMany({
       where: { sessionId },
       orderBy: { chunkIndex: 'desc' },
@@ -80,29 +80,41 @@ export async function POST(
       const expectedIndex = lastChunkIndex + 1
 
       if (chunkIndex !== expectedIndex) {
-        // Log warning but allow continuation (might be retry or out-of-order)
-        console.warn(
-          `Chunk index mismatch: expected ${expectedIndex}, got ${chunkIndex}. Session: ${sessionId}`
-        )
-
-        // If chunk index is way off, reject it
-        if (chunkIndex < lastChunkIndex || chunkIndex > expectedIndex + 10) {
-          return NextResponse.json(
-            {
-              error: `Invalid chunk index: expected ${expectedIndex}, got ${chunkIndex}`,
-            },
-            { status: 400 }
+        // Allow retry of the same chunk (chunkIndex === lastChunkIndex) or next chunk
+        // Also allow if it's within a reasonable range (up to 5 chunks ahead for parallel processing)
+        if (chunkIndex < lastChunkIndex || chunkIndex > expectedIndex + 5) {
+          console.warn(
+            `Chunk index out of range: expected ${expectedIndex} or retry ${lastChunkIndex}, got ${chunkIndex}. Session: ${sessionId}`
+          )
+          // Only reject if it's way off (more than 5 chunks ahead or behind)
+          if (
+            chunkIndex < lastChunkIndex - 1 ||
+            chunkIndex > expectedIndex + 5
+          ) {
+            return NextResponse.json(
+              {
+                error: `Invalid chunk index: expected ${expectedIndex} (or retry ${lastChunkIndex}), got ${chunkIndex}`,
+              },
+              { status: 400 }
+            )
+          }
+        } else {
+          // Log but allow (might be retry or slightly out of order)
+          console.log(
+            `Chunk index variation: expected ${expectedIndex}, got ${chunkIndex}. Allowing (retry/parallel). Session: ${sessionId}`
           )
         }
       }
     } else if (chunkIndex !== 0) {
-      // First chunk should have index 0
-      return NextResponse.json(
-        {
-          error: `First chunk must have index 0, got ${chunkIndex}`,
-        },
-        { status: 400 }
-      )
+      // First chunk should have index 0, but allow retry of index 0
+      if (chunkIndex > 5) {
+        return NextResponse.json(
+          {
+            error: `First chunk must have index 0, got ${chunkIndex}`,
+          },
+          { status: 400 }
+        )
+      }
     }
 
     // Check if chunk already exists

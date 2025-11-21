@@ -9,7 +9,7 @@ import { useSessions } from '@/hooks/useSessions'
 import { useAudioRecorder } from '@/hooks/useAudioRecorder'
 import { useAudioAnalyzer } from '@/hooks/useAudioAnalyzer'
 import { Mic } from 'lucide-react'
-import { getDeviceId } from '@/lib/device'
+
 
 export default function Home() {
   const [showPopup, setShowPopup] = useState(false)
