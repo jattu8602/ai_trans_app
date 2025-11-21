@@ -42,9 +42,15 @@ export async function transcribeAudioFile(audioBlob: Blob): Promise<string> {
       extension,
     })
 
-    // Add timeout to fetch request (28 seconds - before server timeout)
+    // Add timeout to fetch request (slightly less than server timeout)
+    // Server timeout is now 1 hour for large files, so we use 59 minutes to be safe
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 28000)
+    const fileSizeMB = audioBlob.size / (1024 * 1024)
+    const clientTimeoutMs = fileSizeMB > 10
+      ? 3540000 // 59 minutes for large files (1 minute buffer before server timeout)
+      : Math.max(25000, Math.min(3540000, fileSizeMB * 25000)) // Scale with file size
+
+    const timeoutId = setTimeout(() => controller.abort(), clientTimeoutMs)
 
     let response: Response
     try {

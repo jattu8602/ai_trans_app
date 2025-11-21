@@ -13,7 +13,7 @@ import {
   getRecordingState,
 } from '@/lib/indexeddb'
 import { getDeviceId } from '@/lib/device'
-import { transcribeAudioFile } from '@/lib/deepgram-file'
+import { toast } from 'sonner'
 
 interface UseAudioRecorderReturn {
   isRecording: boolean
@@ -53,45 +53,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     loadPersistedState()
   }, [])
 
-  // Update chunk transcript in DB (async helper)
-  const updateChunkTranscript = useCallback(
-    async (sessionId: string, chunkIndex: number, transcript: string) => {
-      try {
-        const deviceId = getDeviceId()
-        const formData = new FormData()
-        formData.append('chunkIndex', chunkIndex.toString())
-        formData.append('transcript', transcript)
-        formData.append('deviceId', deviceId)
-
-        const response = await fetch(
-          `/api/sessions/${sessionId}/chunks/${chunkIndex}/transcript`,
-          {
-            method: 'PUT',
-            body: formData,
-          }
-        )
-
-        if (!response.ok) {
-          console.error(
-            `[useAudioRecorder] Failed to update transcript for chunk ${chunkIndex}:`,
-            response.statusText
-          )
-        } else {
-          console.log(
-            `[useAudioRecorder] Transcript updated for chunk ${chunkIndex}`
-          )
-        }
-      } catch (error) {
-        console.error(
-          `[useAudioRecorder] Error updating transcript for chunk ${chunkIndex}:`,
-          error
-        )
-      }
-    },
-    []
-  )
-
-  // Handle chunk upload (async/parallel transcription)
+  // Handle chunk upload (no transcription - will be done on-demand)
   const handleChunk = useCallback(
     async (chunk: Blob, index: number, duration: number) => {
       // Validate session ID before processing
@@ -121,7 +83,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         })
 
         if (!storeResult.success) {
-          console.warn('IndexedDB storage failed, using server-only:', storeResult.error)
+          console.warn(
+            'IndexedDB storage failed, using server-only:',
+            storeResult.error
+          )
         }
 
         // Upload chunk to server IMMEDIATELY (without transcript)
@@ -136,101 +101,44 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         console.log(
           `[useAudioRecorder] Uploading chunk ${index} to server (without transcript)...`
         )
-        const uploadResponse = await fetch(`/api/sessions/${sessionId}/chunks`, {
-          method: 'POST',
-          body: formData,
-        })
+        const uploadResponse = await fetch(
+          `/api/sessions/${sessionId}/chunks`,
+          {
+            method: 'POST',
+            body: formData,
+          }
+        )
 
         if (!uploadResponse.ok) {
           console.error('Failed to upload chunk:', uploadResponse.statusText)
-        } else {
-          console.log(`[useAudioRecorder] Chunk ${index} uploaded successfully`)
-        }
-
-        // Start transcription in PARALLEL (don't await - fire and forget)
-        // Skip transcription for very short chunks (< 0.5 seconds) or very large chunks (> 1MB)
-        // Also skip if we have too many pending transcriptions (to avoid overwhelming the system)
-        const chunkSizeMB = chunk.size / (1024 * 1024)
-        const maxPendingTranscriptions = 20 // Limit concurrent transcriptions
-        const shouldTranscribe =
-          duration >= 0.5 &&
-          chunk.size > 100 &&
-          chunkSizeMB < 1.5 &&
-          pendingChunksRef.current.size < maxPendingTranscriptions
-
-        if (shouldTranscribe) {
-          // Transcribe in background with timeout
-          const transcriptionPromise = transcribeAudioFile(chunk)
-          const timeoutPromise = new Promise<string>((resolve) => {
-            setTimeout(() => {
-              console.warn(
-                `[useAudioRecorder] Transcription timeout for chunk ${index} (${chunkSizeMB.toFixed(2)}MB), skipping`
-              )
-              resolve('') // Return empty transcript on timeout
-            }, 25000) // 25 second timeout (before server's 30s timeout)
+          toast.error(`Chunk ${index + 1} upload failed`, {
+            description: uploadResponse.statusText,
+            duration: 3000,
           })
-
-          Promise.race([transcriptionPromise, timeoutPromise])
-            .then((chunkTranscript) => {
-              if (chunkTranscript) {
-                console.log(
-                  `[useAudioRecorder] ✅ Chunk ${index} transcribed successfully:`,
-                  {
-                    chunkIndex: index,
-                    sessionId: sessionId,
-                    transcriptLength: chunkTranscript.length,
-                    wordCount: chunkTranscript.split(/\s+/).length,
-                    preview:
-                      chunkTranscript.substring(0, 100) +
-                      (chunkTranscript.length > 100 ? '...' : ''),
-                    fullTranscript: chunkTranscript, // Log full transcript for debugging
-                  }
-                )
-                // Update chunk with transcript
-                updateChunkTranscript(sessionId, index, chunkTranscript).catch(
-                  (err) => {
-                    console.error(
-                      `[useAudioRecorder] Failed to update chunk ${index} transcript:`,
-                      err
-                    )
-                  }
-                )
-              } else {
-                console.log(
-                  `[useAudioRecorder] ⚠️ Chunk ${index} transcription returned empty (silence or no speech)`
-                )
-              }
-            })
-            .catch((transcriptionError) => {
-              console.error(
-                `[useAudioRecorder] Failed to transcribe chunk ${index}:`,
-                transcriptionError
-              )
-              // Chunk is already saved, transcription failure is not critical
-            })
         } else {
-          if (duration < 0.5) {
-            console.log(
-              `[useAudioRecorder] Skipping transcription for chunk ${index} (duration: ${duration.toFixed(2)}s < 0.5s)`
-            )
-          } else if (chunk.size <= 100) {
-            console.log(
-              `[useAudioRecorder] Skipping transcription for chunk ${index} (size: ${chunk.size} bytes, too small)`
-            )
-          } else if (chunkSizeMB >= 1.5) {
-            console.log(
-              `[useAudioRecorder] Skipping transcription for chunk ${index} (size: ${chunkSizeMB.toFixed(2)}MB, too large - likely to timeout)`
-            )
+          console.log(
+            `[useAudioRecorder] Chunk ${index} uploaded successfully (transcription will be done on-demand)`
+          )
+          // Show toast for chunk upload (only for first few chunks to avoid spam)
+          if (index < 3) {
+            toast.success(`Chunk ${index + 1} saved`, {
+              description: `${duration.toFixed(1)}s of audio uploaded`,
+              duration: 2000,
+            })
           }
         }
       } catch (error) {
         console.error('Error handling chunk:', error)
+        toast.error(`Error processing chunk ${index + 1}`, {
+          description: error instanceof Error ? error.message : 'Unknown error',
+          duration: 3000,
+        })
       } finally {
         // Remove from pending chunks
         pendingChunksRef.current.delete(index)
       }
     },
-    [updateChunkTranscript]
+    []
   )
 
   // Start recording
@@ -244,7 +152,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
         // Set session ID before creating recorder to ensure it's available for chunks
         sessionIdRef.current = sessionId
-        console.log(`[useAudioRecorder] Starting recording with session ID: ${sessionId}`)
+        console.log(
+          `[useAudioRecorder] Starting recording with session ID: ${sessionId}`
+        )
 
         const recorder = new AudioRecorder({
           mode,
@@ -283,13 +193,16 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       } catch (error) {
         setState((prev) => ({
           ...prev,
-          error: error instanceof Error ? error.message : 'Failed to start recording',
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Failed to start recording',
           isRecording: false,
         }))
         throw error
       }
     },
-    [handleChunk],
+    [handleChunk]
   )
 
   // Pause recording
@@ -312,7 +225,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       // Wait for all pending chunks to complete (with timeout)
       const maxWaitTime = 10000 // 10 seconds max wait
       const startWait = Date.now()
-      while (pendingChunksRef.current.size > 0 && Date.now() - startWait < maxWaitTime) {
+      while (
+        pendingChunksRef.current.size > 0 &&
+        Date.now() - startWait < maxWaitTime
+      ) {
         console.log(
           `[useAudioRecorder] Waiting for ${pendingChunksRef.current.size} pending chunks to complete...`
         )
@@ -389,4 +305,3 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     getStream,
   }
 }
-

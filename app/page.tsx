@@ -9,6 +9,7 @@ import { useSessions } from '@/hooks/useSessions'
 import { useAudioRecorder } from '@/hooks/useAudioRecorder'
 import { useAudioAnalyzer } from '@/hooks/useAudioAnalyzer'
 import { Mic } from 'lucide-react'
+import { toast } from 'sonner'
 
 
 export default function Home() {
@@ -74,15 +75,32 @@ export default function Home() {
               status: 'completed',
               duration: Math.floor(duration / 1000),
             })
+            toast.info('Recording auto-stopped', {
+              description: 'Session saved automatically',
+            })
           }
         } catch (error) {
           console.error('Error updating session status:', error)
+          toast.error('Failed to save session', {
+            description: 'Please check your connection',
+          })
         }
       }
 
       updateSessionStatus()
     }
   }, [isRecording, currentSessionId, deviceId, duration, updateSession])
+
+  // Show toast when chunk count changes (for progress indication)
+  useEffect(() => {
+    if (isRecording && chunkCount > 0 && chunkCount % 5 === 0) {
+      // Show progress every 5 chunks
+      toast.info(`Recording in progress`, {
+        description: `${chunkCount} chunks saved (${Math.floor(duration / 1000)}s)`,
+        duration: 2000,
+      })
+    }
+  }, [chunkCount, isRecording, duration])
 
   const handleStartClick = () => {
     setShowPopup(true)
@@ -113,6 +131,9 @@ export default function Home() {
 
       console.log('Session created:', session.id)
       setCurrentSessionId(session.id)
+      toast.success('Session created', {
+        description: 'Recording session initialized',
+      })
 
       // Update session status to recording
       // Note: recordingStartedAt will be set on the server side
@@ -128,6 +149,10 @@ export default function Home() {
       await startRecording(mode, session.id)
       console.log('Recording started successfully')
 
+      toast.success('Recording started', {
+        description: `Mode: ${mode === 'mic' ? 'Microphone' : 'System Audio + Mic'}`,
+      })
+
       setShowPopup(false)
     } catch (error) {
       console.error('Error starting recording:', error)
@@ -137,7 +162,10 @@ export default function Home() {
           : 'Failed to start recording. Please check permissions.'
 
       // Show user-friendly error
-      alert(`Recording Error: ${errorMessage}`)
+      toast.error('Recording failed', {
+        description: errorMessage,
+        duration: 5000,
+      })
 
       // Reset state
       setCurrentSessionId(null)
@@ -149,10 +177,16 @@ export default function Home() {
 
   const handlePause = () => {
     pauseRecording()
+    toast.info('Recording paused', {
+      description: 'Audio capture is paused',
+    })
   }
 
   const handleResume = () => {
     resumeRecording()
+    toast.success('Recording resumed', {
+      description: 'Audio capture continues',
+    })
   }
 
   const handleStop = async () => {
@@ -181,11 +215,22 @@ export default function Home() {
         })
       }
 
+      const durationSeconds = Math.floor(duration / 1000)
+      const minutes = Math.floor(durationSeconds / 60)
+      const seconds = durationSeconds % 60
+
+      toast.success('Recording stopped', {
+        description: `Duration: ${minutes}:${seconds.toString().padStart(2, '0')} • ${chunkCount} chunks saved`,
+        duration: 4000,
+      })
+
       setCurrentSessionId(null)
       setRecordingMode(null)
     } catch (error) {
       console.error('Error stopping recording:', error)
-      alert('Failed to stop recording')
+      toast.error('Failed to stop recording', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      })
     }
   }
 

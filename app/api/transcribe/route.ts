@@ -37,15 +37,27 @@ export async function POST(request: NextRequest) {
 
     // Detect mime type from file
     const mimeType = audioFile.type || 'audio/webm'
+
+    // Log detailed file information
     console.log('[API /transcribe] Processing audio file:', {
       size: audioFile.size,
+      sizeMB: (audioFile.size / (1024 * 1024)).toFixed(2),
       mimeType,
       name: audioFile.name,
+      lastModified: audioFile.lastModified
+        ? new Date(audioFile.lastModified).toISOString()
+        : 'unknown',
     })
 
     // Convert File to Buffer for Deepgram SDK
     const arrayBuffer = await audioFile.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
+
+    console.log('[API /transcribe] File converted to buffer:', {
+      bufferSize: buffer.length,
+      bufferSizeMB: (buffer.length / (1024 * 1024)).toFixed(2),
+      firstBytes: buffer.slice(0, 20).toString('hex').substring(0, 40) + '...',
+    })
 
     // Validate buffer is not empty
     if (buffer.length === 0) {
@@ -80,17 +92,33 @@ export async function POST(request: NextRequest) {
       '[API /transcribe] Sending to Deepgram (Hindi + English support)...',
       {
         bufferSize: buffer.length,
+        bufferSizeMB: (buffer.length / (1024 * 1024)).toFixed(2),
         options: transcriptionOptions,
         languageMode:
           'Hindi with auto-detection (supports English/Hindi/Hinglish)',
       }
     )
 
-    // Add timeout wrapper for Deepgram API call (30 seconds max)
+    // Add timeout wrapper for Deepgram API call (1 hour max for long recordings)
     const transcriptionPromise = deepgram.listen.prerecorded.transcribeFile(
       buffer,
       transcriptionOptions
     )
+
+    // Calculate timeout based on file size (1 hour max, but scale for smaller files)
+    // For very large files (> 10MB), allow up to 1 hour
+    // For smaller files, use proportional timeout (minimum 30 seconds)
+    const fileSizeMB = audioFile.size / (1024 * 1024)
+    const timeoutMs =
+      fileSizeMB > 10
+        ? 3600000 // 1 hour for large files (> 10MB)
+        : Math.max(30000, Math.min(3600000, fileSizeMB * 30000)) // Scale between 30s and 1 hour
+
+    console.log('[API /transcribe] Timeout configured:', {
+      fileSizeMB: fileSizeMB.toFixed(2),
+      timeoutSeconds: (timeoutMs / 1000).toFixed(0),
+      timeoutMinutes: (timeoutMs / 60000).toFixed(1),
+    })
 
     const timeoutPromise = new Promise<{
       result: null
@@ -101,18 +129,55 @@ export async function POST(request: NextRequest) {
           result: null,
           error: {
             status: 408,
-            message: 'Transcription timeout after 30 seconds',
+            message: `Transcription timeout after ${Math.floor(
+              timeoutMs / 1000
+            )} seconds (${(timeoutMs / 60000).toFixed(1)} minutes)`,
           },
         })
-      }, 30000) // 30 second timeout
+      }, timeoutMs)
     })
 
     const result = await Promise.race([
-      transcriptionPromise.then((r) => ({ result: r.result, error: r.error })),
+      transcriptionPromise.then((r) => {
+        console.log('[API /transcribe] Deepgram response received:', {
+          hasResult: !!r.result,
+          hasError: !!r.error,
+          errorStatus: r.error
+            ? 'status' in r.error
+              ? r.error.status
+              : 'unknown'
+            : null,
+          errorMessage: r.error
+            ? 'message' in r.error
+              ? r.error.message
+              : String(r.error)
+            : null,
+        })
+        return { result: r.result, error: r.error }
+      }),
       timeoutPromise,
     ])
 
     const { result: finalResult, error } = result
+
+    console.log('[API /transcribe] Transcription result after race:', {
+      hasResult: !!finalResult,
+      hasError: !!error,
+      resultType: finalResult ? typeof finalResult : 'null',
+      resultKeys:
+        finalResult && typeof finalResult === 'object'
+          ? Object.keys(finalResult)
+          : [],
+      errorType: error ? typeof error : 'null',
+    })
+
+    // Log full result structure for debugging
+    if (finalResult) {
+      console.log(
+        '[API /transcribe] Full Deepgram result structure:',
+        JSON.stringify(finalResult, null, 2).substring(0, 3000)
+      )
+    }
 
     if (error) {
       console.error('[API /transcribe] Deepgram error:', error)
@@ -168,15 +233,72 @@ export async function POST(request: NextRequest) {
     }
 
     // Extract transcript from response
+    console.log('[API /transcribe] Extracting transcript from result:', {
+      hasResults: !!finalResult?.results,
+      hasChannels: !!finalResult?.results?.channels,
+      channelsCount: finalResult?.results?.channels?.length || 0,
+      firstChannel: finalResult?.results?.channels?.[0]
+        ? {
+            hasAlternatives: !!finalResult.results.channels[0].alternatives,
+            alternativesCount:
+              finalResult.results.channels[0].alternatives?.length || 0,
+          }
+        : null,
+    })
+
     const transcript =
       finalResult?.results?.channels?.[0]?.alternatives?.[0]?.transcript
 
     if (!transcript || !transcript.trim()) {
       // Return empty string if no transcript (might be silence)
       console.log(
-        '[API /transcribe] No transcript found (silence or empty audio)'
+        '[API /transcribe] ⚠️ No transcript found (silence or empty audio)',
+        {
+          transcriptValue: transcript,
+          transcriptType: typeof transcript,
+          rawResult: finalResult
+            ? JSON.stringify(finalResult, null, 2).substring(0, 2000)
+            : 'null',
+          fullResultStructure: finalResult
+            ? {
+                hasMetadata: !!finalResult.metadata,
+                hasResults: !!finalResult.results,
+                resultsStructure: finalResult.results
+                  ? {
+                      hasChannels: !!finalResult.results.channels,
+                      channels:
+                        finalResult.results.channels?.map(
+                          (ch: any, i: number) => ({
+                            index: i,
+                            hasAlternatives: !!ch.alternatives,
+                            alternativesCount: ch.alternatives?.length || 0,
+                            firstAlternative: ch.alternatives?.[0]
+                              ? {
+                                  hasTranscript:
+                                    !!ch.alternatives[0].transcript,
+                                  transcriptLength:
+                                    ch.alternatives[0].transcript?.length || 0,
+                                  confidence: ch.alternatives[0].confidence,
+                                }
+                              : null,
+                          })
+                        ) || [],
+                    }
+                  : null,
+              }
+            : null,
+        }
       )
-      return NextResponse.json({ transcript: '' })
+      return NextResponse.json({
+        transcript: '',
+        warning:
+          'No transcript found - audio might be silence, corrupt, or unsupported format',
+        debug: {
+          hasResult: !!finalResult,
+          hasResults: !!finalResult?.results,
+          channelsCount: finalResult?.results?.channels?.length || 0,
+        },
+      })
     }
 
     const trimmedTranscript = transcript.trim()

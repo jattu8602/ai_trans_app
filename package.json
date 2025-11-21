@@ -7,10 +7,12 @@
     "dev": "prisma generate && tsx server.ts",
     "build": "prisma generate && next build",
     "start": "NODE_ENV=production tsx server.ts",
-    "lint": "eslint"
+    "lint": "eslint",
+    "transcribe-session": "tsx test/transcribe-session.ts"
   },
   "dependencies": {
     "@deepgram/sdk": "^4.11.2",
+    "@google/generative-ai": "^0.21.0",
     "@prisma/adapter-pg": "^7.0.0",
     "@prisma/client": "^7.0.0",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -26,6 +28,7 @@
     "react-dom": "19.2.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
+    "sonner": "^1.7.0",
     "tailwind-merge": "^3.4.0",
     "zod": "^4.1.12"
   },
