@@ -1,37 +1,96 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ScribeAI - AI-Powered Audio Transcription & Meeting Assistant
 
-## Getting Started
+![Next.js](https://img.shields.io/badge/Next.js-16.0-black?style=flat-square&logo=next.js)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=flat-square&logo=typescript)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue?style=flat-square&logo=postgresql)
+![Prisma](https://img.shields.io/badge/Prisma-7.0-2D3748?style=flat-square&logo=prisma)
 
-First, run the development server:
+**ScribeAI** is a full-stack web application for capturing, transcribing, and summarizing audio sessions. Perfect for meetings, interviews, and any scenario where you need accurate transcriptions with AI-powered summaries.
+
+## 🚀 Key Features
+
+- **🎤 Multi-Mode Recording**: Record from microphone or capture system audio (Google Meet, Zoom, etc.)
+- **⏱️ Long Session Support**: Handle recordings up to 1+ hours with intelligent chunking
+- **📝 Real-Time Transcription**: On-demand transcription using Deepgram API
+- **🤖 AI Summaries**: Generate comprehensive meeting summaries with Google Gemini
+- **💾 Persistent Storage**: IndexedDB caching + PostgreSQL database
+- **🔄 Real-Time Updates**: Socket.io for live status updates
+- **📊 Rich Text Formatting**: Beautifully formatted transcripts and summaries
+- **🌙 Dark Mode**: Comfortable viewing for long sessions
+
+## 📚 Documentation
+
+Comprehensive documentation is available in the [`docs/`](./docs/) folder:
+
+- **[Architecture](./docs/ARCHITECTURE.md)** - System design, diagrams, and data flow
+- **[Setup Guide](./docs/SETUP.md)** - Installation and configuration
+- **[Usage Guide](./docs/USAGE.md)** - How to use the application
+- **[API Documentation](./docs/API.md)** - REST API and Socket.io events
+- **[Problems & Solutions](./docs/PROBLEMS.md)** - Issues encountered and fixes
+- **[Scalability Analysis](./docs/SCALABILITY.md)** - Long-session handling and performance
+- **[Project Structure](./docs/STRUCTURE.md)** - Codebase organization
+
+## 🛠️ Quick Start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+# Install dependencies
+pnpm install
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your API keys
+
+# Set up database
+pnpm prisma migrate dev
+
+# Start development server
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Visit [http://localhost:3000](http://localhost:3000) to start using ScribeAI.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+For detailed setup instructions, see [SETUP.md](./docs/SETUP.md).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🏗️ Tech Stack
 
-## Learn More
+- **Frontend**: Next.js 16 (App Router), React 19, TypeScript
+- **Backend**: Next.js API Routes, Node.js, Socket.io
+- **Database**: PostgreSQL with Prisma ORM
+- **Audio Processing**: MediaRecorder API, Web Audio API
+- **Transcription**: Deepgram API
+- **AI Summarization**: Google Gemini API
+- **Styling**: Tailwind CSS, Radix UI
+- **State Management**: React Hooks, IndexedDB
 
-To learn more about Next.js, take a look at the following resources:
+## 📋 Prerequisites
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Node.js 18+ and pnpm
+- PostgreSQL database (local or cloud)
+- Deepgram API key
+- Google Gemini API key
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🎯 Core Workflow
 
-## Deploy on Vercel
+1. **Start Recording**: Choose mic or system audio mode
+2. **Record Session**: Audio is chunked every 30 seconds
+3. **Stop Recording**: Session is saved
+4. **Generate Transcript**: On-demand transcription of all chunks
+5. **Generate Summary**: AI-powered summary with key points and action items
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 📖 Learn More
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# ai_trans_app
+- [Architecture Overview](./docs/ARCHITECTURE.md)
+- [API Reference](./docs/API.md)
+- [Troubleshooting](./docs/PROBLEMS.md)
+
+## 📝 License
+
+This project is private and proprietary.
+
+## 🤝 Contributing
+
+This is a private project. For questions or issues, please contact the development team.
+
+---
+
+**Built with ❤️ for seamless meeting transcription and summarization**
